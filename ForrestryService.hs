@@ -173,7 +173,31 @@ moveLumberjack lj@(c, w) = do
 									
 									modify (\s -> s{lumberjacks = updatedLJ : otherLumberjacks, randGen = r'})
 						where
-							ljAtCoords lj c = any (\(xy, _) -> xy == c) lj
+							ljAtCoords ljs c = any (\(xy, _) -> xy == c) ljs
+
+-- Move a bear, assuming it's OK
+moveBear :: Lumberjack -> ForrestFunction ()
+moveBear b@(c, w) = do
+						bs <- gets bears
+					
+						let otherBears = filter ((/=) b) bs
+					
+						possibleWalks <- neighboringCells c
+					
+						let withoutConflicts = filter (not . bAtCoords otherBears) possibleWalks
+					
+						if null withoutConflicts then										-- They can't move, lose a turn
+							modify (\s -> s{bears = (c, w - 1) : otherBears})
+						else
+							do																-- They CAN move, find the spot
+								r <- gets randGen
+					
+								let (n, r') = randomR (0, (length withoutConflicts - 1)) r
+								let updatedB = (withoutConflicts !! n, w - 1)				-- New coords, one less walk left
+							
+								modify (\s -> s{bears = updatedB : otherBears, randGen = r'})
+					where
+						bAtCoords bs c = any (\(xy, _) -> xy == c) bs
 
 -- Check if the simulation is over (4800 months or no trees left)
 simulationOver :: ForrestFunction Bool
