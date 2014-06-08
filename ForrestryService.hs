@@ -24,9 +24,11 @@ type Coords = (Int, Int)
 
 type MovesLeft = Int
 
-type Lumberjack = (Coords, MovesLeft)
+type Moveable = (Coords, MovesLeft)
 
-type Bear = (Coords, MovesLeft)
+type Lumberjack = Moveable
+
+type Bear = Moveable
 
 type Forrest = [[PossibleTree]]
 
@@ -142,6 +144,36 @@ possiblySpawnTree c = do
 										
 										modify (\s -> s{sprouts = sp + 1, randGen = r'})
 
+-- Find things who need to be moved the given number of spaces
+findThingsToMove :: Int -> (ForrestState -> [Moveable]) -> ForrestFunction [Moveable]
+findThingsToMove w f = do
+							ljs <- gets f								-- Use the accessor to get what we need
+							
+							return $ filter (\lj -> snd lj == w) ljs	-- Filter to only those with that number of turns given
+
+-- Move a lumberjack, assuming it's OK
+moveLumberjack :: Lumberjack -> ForrestFunction ()
+moveLumberjack lj@(c, w) = do
+							ljs <- gets lumberjacks
+							
+							let otherLumberjacks = filter ((/=) lj) ljs
+							
+							possibleWalks <- neighboringCells c
+							
+							let withoutConflicts = filter (not . ljAtCoords otherLumberjacks) possibleWalks
+							
+							if null withoutConflicts then										-- They can't move, lose a turn
+								modify (\s -> s{lumberjacks = (c, w - 1) : otherLumberjacks})
+							else
+								do																-- They CAN move, find the spot
+									r <- gets randGen
+							
+									let (n, r') = randomR (0, (length withoutConflicts - 1)) r
+									let updatedLJ = (withoutConflicts !! n, w - 1)				-- New coords, one less walk left
+									
+									modify (\s -> s{lumberjacks = updatedLJ : otherLumberjacks, randGen = r'})
+						where
+							ljAtCoords lj c = any (\(xy, _) -> xy == c) lj
 
 -- Check if the simulation is over (4800 months or no trees left)
 simulationOver :: ForrestFunction Bool
@@ -274,7 +306,7 @@ findHarvests (lj:ljs) f
 				where
 					(x, y) = fst lj
 					t = f !! y !! x
-						
+	
 -- Record that a harvest happened
 handleHarvest :: Lumberjack -> ForrestFunction ()
 handleHarvest lj = do
