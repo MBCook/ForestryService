@@ -174,8 +174,6 @@ setTree (x, y) t = do
 						let updatedForrest = rowsBefore ++ (lineBefore ++ t:lineAfter):rowsAfter
 					
 						modify (\s -> s{forrest = updatedForrest})							
-					where
-
 
 -- Find the coords of all the neighboring cells
 neighboringCells :: Coords -> ForrestFunction [Coords]
@@ -219,6 +217,24 @@ incrementMonth = do
 					
 					modify (\s -> s{month = m + 1})
 
+-- Figure out and handle all possible maulings
+calculateMaulings :: ForrestFunction ()
+calculateMaulings = do
+						bs <- gets bears
+						ljs <- gets lumberjacks
+						
+						let maulings = findMaulings bs ljs
+						
+						mapM_ handleMauling maulings			-- Run each one through our mauling updater
+
+-- Find the bears that are mauling people today
+findMaulings :: [Bear] -> [Lumberjack] -> [Bear]
+findMaulings [] _ = []
+findMaulings _ [] = []
+findMaulings (b:bs) ljs
+				| any (\x -> fst b == fst x) ljs	= b : (findMaulings bs ljs)
+				| otherwise							= findMaulings bs ljs
+
 -- Record that a mauling happened
 handleMauling :: Bear -> ForrestFunction ()
 handleMauling b = do
@@ -237,6 +253,27 @@ handleMauling b = do
 						spawnLumberjack					-- Always need at least one LJ
 					else
 						return ()
+		
+-- Figure out and handle all possible harvests
+calculateHarvests :: ForrestFunction ()
+calculateHarvests = do
+						f <- gets forrest
+						ljs <- gets lumberjacks
+						
+						let harvests = findHarvests ljs f
+						
+						mapM_ handleHarvest harvests			-- Run each one through our harvest updater		
+		
+-- Find the lumberjacks that are harvesting trees today
+findHarvests :: [Lumberjack] -> Forrest -> [Lumberjack]
+findHarvests [] _ = []
+findHarvests (lj:ljs) f
+				| isSapling t	= findHarvests ljs f
+				| isJust t	 	= lj : (findHarvests ljs f)
+				| otherwise		= findHarvests ljs f
+				where
+					(x, y) = fst lj
+					t = f !! y !! x
 						
 -- Record that a harvest happened
 handleHarvest :: Lumberjack -> ForrestFunction ()
