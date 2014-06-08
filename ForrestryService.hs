@@ -492,8 +492,8 @@ moveLumberjacks w = do
 						calculateHarvests								-- Handle any possible harvests
 
 -- Print out the monthly stats
-printYearlyStats :: Int -> Int -> ForrestFunction ()
-printYearlyStats hired zooed = do
+printYearlyStats :: Int -> ForrestFunction ()
+printYearlyStats hired = do
 									mo <- gets month						
 						
 									let y = mo `mod` 12						
@@ -507,8 +507,16 @@ printYearlyStats hired zooed = do
 									(ns, nm, ne) <- countTrees
 												
 									liftIO $ printf "Year [%04d]: Forest has %d Trees, %d Saplings, %d Elder Trees, %d Lumberjacks and %d Bears.\n" y nm ns ne (length ljs) (length bs)
-									liftIO $ printf "Year [%04d]: %d Bears captured by zoo due to %d Maulings." zooed m									
-									liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested %d new Lumberjacks hired." h hired
+									
+									if m > 0 then									
+										liftIO $ printf "Year [%04d]: 1 Bear captured by zoo due to %d Maulings." y m
+									else
+										liftIO $ printf "Year [%04d]: 1 Bear spawned since they had a clean year." y
+									
+									if hired > 0 then
+										liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested %d new Lumberjacks hired." y hired
+									else
+										liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested 1 Lumberjack was let go." y hired										
 									
 -- Print out the yearly stats
 printMonthlyStats :: ForrestFunction ()
@@ -543,11 +551,37 @@ possibleYearlyUpdate = do
 								return ()
 							else
 								do
-									-- TODO: Spawn bears/LJs
+									-- We need to figure out if we need to trap a bear, spawn a bear, and/or hire LJs
 									
-									printYearlyStats 0 0					-- Print the year's events
+									m <- gets yearMaulings
 									
-									clearYearlyStats
+									if m == 0 then
+										spawnBear
+									else
+										trapBear
+									
+									-- Figure out how many LJs we need to add / remove
+									
+									h <- gets yearHarvests
+									ljs <- gets lumberjacks
+
+									let needed = (h - length ljs) `div` 10 + 1		-- Each 10 extra lumber is 1 extra LJ
+									
+									if h >= (length ljs) then
+										sequence_ (replicate needed spawnLumberjack)
+									else
+										fireLumberjack
+										
+									newLjs <- gets lumberjacks
+									
+									if length newLjs == 0 then
+										spawnLumberjack					-- Never run out of lumberjacks
+									else
+										return ()						-- We still have LJs, nothing special to do
+									
+									printYearlyStats needed					-- Print the year's events
+									
+									clearYearlyStats					-- Clear the stats
 
 -- Do one month's worth of work
 monthlyUpdate :: ForrestFunction ()			
@@ -584,9 +618,7 @@ monthlyUpdate = do
 					if done then
 						return ()								-- If we're done don't go any further
 					else
-						monthlyUpdate							-- We've got more to do, do it again!
-
-					
+						monthlyUpdate							-- We've got more to do, do it again!					
 
 ------------------ Our main function, to do the work ------------------
 
