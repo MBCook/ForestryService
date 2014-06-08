@@ -8,6 +8,7 @@ import System.Random
 import System.IO
 import Data.Char
 import Data.Maybe
+import Control.Monad
 import Control.Monad.Trans.State
 import Control.Monad.Trans
 import Codec.Picture.Gif
@@ -77,24 +78,43 @@ isSapling (Just t)	= t <= 12
 isSapling _			= False
 
 isMature :: PossibleTree -> Bool
-isMature Nothing		= False
-isMature t				= not $ (isSapling t && isElder t)
+isMature (Just t)	= t > 12 && t <= 120
+isMature _			= False
 
 isElder :: PossibleTree -> Bool
 isElder (Just t)	= t > 120
 isElder _			= False
 
 -- Check if the tree should generate a sapling this month
--- shouldSpawn :: (Maybe Tree, StdGen) -> (Bool, StdGen)
--- shouldSpawn (Nothing, s) = (Fasle, s)
--- shouldSpawn (Just t, s)	= case t of
--- 							isSapling t	-> (False, s)
--- 							isElder t	-> (num <= 0.2, s')
--- 											where
--- 												(num, s') = randomR (0.0, 1.0) s
--- 							_			-> (num <= 0.1, s')
--- 											where
--- 												(num, s') = randomR (0.0, 1.0) s
+shouldSpawn :: PossibleTree -> ForrestFunction Bool
+shouldSpawn t = do
+					r <- gets randGen
+					
+					let (n, r') = randomR (1 :: Int, 10 :: Int) r
+					
+					modify (\s -> s{randGen = r'})
+					
+					case t of _
+							| isNothing t	-> return False		-- Non-trees and saplings can't spawn
+							| isSapling t	-> return False
+							| isMature t	-> return $ n == 1	-- Mature have 10% chance at spawn each month
+							| isElder t		-> return $ n <= 2	-- Elders have 20% chance at spawn each month
+						
+-- Given a tree at coords, get the coords it can spawn at
+possibleSproutPoints :: Coords -> ForrestFunction [Coords]
+possibleSproutPoints c = do
+							t <- getTree c
+					
+							neighboringCoords <- neighboringCells c					-- Neighboring cells
+							neighboringTrees <- mapM getTree neighboringCoords		-- Neighboring trees
+							
+							let pairs = zip neighboringCoords neighboringTrees		-- Match 'em together so we can filter
+							let goodPairs = filter (isNothing . snd) pairs			-- Take only empty spots
+
+							if isNothing t || isSapling t then
+								return []
+							else
+								return $ map fst goodPairs							-- Return only the coords
 
 -- Check if the simulation is over (4800 months or no trees left)
 simulationOver :: ForrestFunction Bool
@@ -110,6 +130,21 @@ freePlots = do
 				f <- gets forrest
 				
 				return $ any isNothing (concat f)
+
+-- Get the coords of every tree in the forrest that can spawn
+findSpawnableTrees :: ForrestFunction [Coords]
+findSpawnableTrees = do
+						f <- gets forrest
+						
+						let rowsWithYs		= addYCoords f								-- Turn [row] to [(row, Y-coord)]
+						let allWithXCoords	= map addXCoords rowsWithYs					-- Turn each row to [(PossibleTree, x, y)]
+						let asBigList		= concat allWithXCoords						-- Flatten that
+						let onlySpawnable	= filter (\(t, _, _) -> isMature t || isElder t) asBigList	-- Keep only trees that can spawn
+						
+						return $ map (\(t, x, y) -> (x, y)) onlySpawnable				-- Stip out the tree from each tuple						
+					where
+						addYCoords f = zip f [0,1..]
+						addXCoords (r, y) = zip3 r [0,1..] (repeat y)
 
 -- Get the tree at the given spot
 getTree :: Coords -> ForrestFunction PossibleTree
@@ -150,7 +185,7 @@ countTrees = do
 									| isSapling t	= (s + 1, m, e)
 									| isMature t	= (s, m + 1, e )
 									| isElder t		= (s, m, e + 1)
-									| otherwise		= (s, m, e)
+									| isNothing t	= (s, m, e)
 
 -- Increment the age of all the trees in the forrest
 incrementTrees :: ForrestFunction ()
