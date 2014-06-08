@@ -104,6 +104,13 @@ simulationOver = do
 					
 					return $ (m >= 4800) || (s + m + e == 0)
 
+-- Check if there is anywhere for trees to grow
+freePlots :: ForrestFunction Bool
+freePlots = do
+				f <- gets forrest
+				
+				return $ any isNothing (concat f)
+
 -- Get the tree at the given spot
 getTree :: Coords -> ForrestFunction PossibleTree
 getTree (x, y) = do
