@@ -21,9 +21,11 @@ type PossibleTree = Maybe Tree
 
 type Coords = (Int, Int)
 
-type Lumberjack = Coords
+type MovesLeft = Int
 
-type Bear = Coords
+type Lumberjack = (Coords, MovesLeft)
+
+type Bear = (Coords, MovesLeft)
 
 type Forrest = [[PossibleTree]]
 
@@ -43,8 +45,7 @@ data ForrestState = ForrestState {
 					yearMaulings	:: Int,
 					randGen			:: StdGen,
 					frames			:: [Frame],
-					width			:: Int,
-					height			:: Int
+					size			:: Int
 				}
 
 type ForrestFunction a = StateT ForrestState IO a
@@ -95,6 +96,14 @@ isElder _			= False
 -- 											where
 -- 												(num, s') = randomR (0.0, 1.0) s
 
+-- Check if the simulation is over (4800 months or no trees left)
+simulationOver :: ForrestFunction Bool
+simulationOver = do
+					m <- gets month
+					(s, m, e) <- countTrees
+					
+					return $ (m >= 4800) || (s + m + e == 0)
+
 -- Get the tree at the given spot
 getTree :: Coords -> ForrestFunction PossibleTree
 getTree (x, y) = do
@@ -117,12 +126,11 @@ setTree (x, y) t = do
 -- Find the coords of all the neighboring cells
 neighboringCells :: Coords -> ForrestFunction [Coords]
 neighboringCells (x, y) = do
-						w <- gets width
-						h <- gets height
+						s <- gets size
 						
 						let possibilities = [(x + i, y + j) | i <- [-1..1], j <- [-1..1], i /= 0 && j /= 0]
 
-						return $ filter (\(x, y) -> x >= 0 && y >= 0 && x < w && y < h) possibilities
+						return $ filter (\(x, y) -> x >= 0 && y >= 0 && x < s && y < s) possibilities
 
 -- Count the number of trees in each state
 countTrees :: ForrestFunction (Int, Int, Int)
@@ -149,6 +157,96 @@ incrementTrees = do
 					updateTree (Nothing)	= Nothing
 					updateTree (Just t)		= Just $ t + 1
 					updateRow				= map updateTree
+
+-- Increment the month number, return if we're in a new year
+incrementMonth :: ForrestFunction Bool
+incrementMonth = do
+					m <- gets month
+					
+					modify (\s -> s{month = m + 1})
+					
+					return $ (m + 1) `mod` 12 == 0
+
+-- Clear the yearly stats
+clearYearlyStats :: ForrestFunction ()
+clearYearlyStats = modify (\s -> s{yearHarvests = 0, yearMaulings = 0})
+
+-- Generate random coords that are in bounds
+randomCoords :: ForrestFunction Coords
+randomCoords = do
+				s <- gets size
+				r <- gets randGen
+				
+				let (x, r') = randomR (0, s - 1) r
+				let (y, r'') = randomR (0, s - 1) r'
+				
+				modify (\i -> i{randGen = r''})
+				
+				return (x, y)
+
+-- Spawn a bear
+spawnBear :: ForrestFunction ()
+spawnBear = do
+				b <- gets bears
+				
+				newCoords <- randomCoords
+				
+				modify (\s -> s{bears = (newCoords, 5):b})
+
+-- Trap a bear
+trapBear :: ForrestFunction ()
+trapBear = do
+				b <- gets bears
+				
+				r <- gets randGen
+				
+				let (badBear, r') = randomR (0, (length b) - 1) r
+				
+				let (earlyBears, _:lateBears) = splitAt badBear b
+				
+				modify (\s -> s{bears = (earlyBears ++ lateBears)})
+				
+-- Spawn a lumberjack
+spawnLumberjack :: ForrestFunction ()
+spawnLumberjack = do
+					lj <- gets lumberjacks
+				
+					newCoords <- randomCoords
+				
+					modify (\s -> s{lumberjacks = (newCoords, 3):lj})
+
+-- Fire a lumberjack
+fireLumberjack :: ForrestFunction ()
+fireLumberjack = do
+					lj <- gets lumberjacks
+				
+					r <- gets randGen
+				
+					let (badLumberjack, r') = randomR (0, (length lj) - 1) r
+				
+					let (earlyLumberjacks, _:lateLumberjacks) = splitAt badLumberjack lj
+				
+					modify (\s -> s{lumberjacks = (earlyLumberjacks ++ lateLumberjacks)})
+
+-- Restore moves to bears
+restoreBearMoves :: ForrestFunction ()
+restoreBearMoves = do
+					b <- gets bears
+					
+					let withoutMoves = map fst b
+					let resetBears = zip withoutMoves (repeat 5)
+					
+					modify (\s -> s{bears = resetBears})
+
+-- Restore moves to lumberjacks
+restoreLumberjackMoves :: ForrestFunction ()
+restoreLumberjackMoves = do
+							lj <- gets lumberjacks
+							
+							let withoutMoves = map fst lj
+							let resetLumberjacks = zip withoutMoves (repeat 3)
+							
+							modify (\s -> s{lumberjacks = resetLumberjacks})
 
 -- 
 -- 
