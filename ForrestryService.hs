@@ -144,6 +144,15 @@ possiblySpawnTree c = do
 										
 										modify (\s -> s{sprouts = sp + 1, randGen = r'})
 
+-- Sprout all trees that need it and can
+calculateSprouts :: ForrestFunction ()
+calculateSprouts = do
+						s <- gets size
+						
+						let coords = [(x, y) | x <- [0.. s - 1], y <- [0 .. s- 1]]
+						
+						mapM_ possiblySpawnTree coords			-- Run each coord through our spawner
+
 -- Find things who need to be moved the given number of spaces
 findThingsToMove :: Int -> (ForrestState -> [Moveable]) -> ForrestFunction [Moveable]
 findThingsToMove w f = do
@@ -176,7 +185,7 @@ moveLumberjack lj@(c, w) = do
 							ljAtCoords ljs c = any (\(xy, _) -> xy == c) ljs
 
 -- Move a bear, assuming it's OK
-moveBear :: Lumberjack -> ForrestFunction ()
+moveBear :: Bear -> ForrestFunction ()
 moveBear b@(c, w) = do
 						bs <- gets bears
 					
@@ -338,11 +347,15 @@ handleHarvest lj = do
 					h <- gets harvests
 					yh <- gets yearHarvests
 					
+					t <- getTree (fst lj)
+					
 					setTree (fst lj) Nothing					-- Remove the tree
 					
 					let updatedLumberjacks = map (\x@(c, t) -> if x == lj then (c, 0) else x) ljs	-- Mark that LJ's turn over
 					
-					modify (\s -> s{harvests = h + 1, yearHarvests = yh + 1, lumberjacks = updatedLumberjacks})	-- Update state
+					let v = if isElder t then 2 else 1			-- Remember that elderly trees are worth 2x
+					
+					modify (\s -> s{harvests = h + v, yearHarvests = yh + v, lumberjacks = updatedLumberjacks})	-- Update state
 						
 -- Check if it's a new year
 isNewYear :: ForrestFunction Bool
@@ -354,6 +367,10 @@ isNewYear = do
 -- Clear the yearly stats
 clearYearlyStats :: ForrestFunction ()
 clearYearlyStats = modify (\s -> s{yearHarvests = 0, yearMaulings = 0})
+
+-- Clear the monthly stats
+clearMonthlyStats :: ForrestFunction ()
+clearMonthlyStats = modify (\s -> s{harvests = 0, sprouts = 0, matures = 0, elderly = 0, maulings = 0})
 
 -- Generate random coords that are in bounds
 randomCoords :: ForrestFunction Coords
@@ -453,7 +470,44 @@ colorPixel f b l x y
 		| otherwise				= emptyColor
 	where
 		c = (x, y)
-		t = f !! y !! x					
+		t = f !! y !! x		
+
+-- Move the bears who have w moves left
+moveBears :: Int -> ForrestFunction ()
+moveBears w = do
+				bears <- findThingsToMove w bears				-- Find the bears who need to move
+				
+				mapM_ moveBear bears							-- Move them
+				
+				calculateMaulings								-- Handle any possible maulings
+
+-- Move the lumberjacks who have w moves left
+moveLumberjacks :: Int -> ForrestFunction ()
+moveLumberjacks w = do
+						lumberjacks <- findThingsToMove w lumberjacks	-- Find the LJs who need to move
+				
+						mapM_ moveLumberjack lumberjacks				-- Move them
+				
+						calculateHarvests								-- Handle any possible harvests
+
+-- Do one month's worth of work
+monthlyUpdate :: ForrestFunction ()			
+monthlyUpdate = do
+					clearMonthlyStats							-- Reset our counters
+					
+					(oldSap, oldMat, oldEld) <- countTrees		-- Figure out the 'old' counts
+					
+					incrementTrees								-- Make every tree older
+					
+					calculateSprouts							-- Make new trees
+					
+					(newSap, newMat, newEld) <- countTrees		-- Re-count trees so we can update stats
+					
+					modify (\s -> s{sprouts = newSap - oldSap,	-- Update tree counts
+									matures = newMat - oldMat,
+									elderly = newEld - oldEld})
+					
+					
 
 ------------------ Our main function, to do the work ------------------
 
