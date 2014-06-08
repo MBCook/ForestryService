@@ -100,9 +100,9 @@ shouldSpawn t = do
 							| isMature t	-> return $ n == 1	-- Mature have 10% chance at spawn each month
 							| isElder t		-> return $ n <= 2	-- Elders have 20% chance at spawn each month
 						
--- Given a tree at coords, get the coords it can spawn at
-possibleSproutPoints :: Coords -> ForrestFunction [Coords]
-possibleSproutPoints c = do
+-- Given a tree at coords, get the coords it can spawn at. Assume it's allowed to spawn.
+possibleSaplingPoints :: Coords -> ForrestFunction [Coords]
+possibleSaplingPoints c = do
 							t <- getTree c
 					
 							neighboringCoords <- neighboringCells c					-- Neighboring cells
@@ -111,10 +111,37 @@ possibleSproutPoints c = do
 							let pairs = zip neighboringCoords neighboringTrees		-- Match 'em together so we can filter
 							let goodPairs = filter (isNothing . snd) pairs			-- Take only empty spots
 
-							if isNothing t || isSapling t then
-								return []
-							else
-								return $ map fst goodPairs							-- Return only the coords
+							return $ map fst goodPairs								-- Return only the coords
+
+-- Spawn a tree at a random location if possible
+possiblySpawnTree :: Coords -> ForrestFunction ()
+possiblySpawnTree c = do
+						t <- getTree c
+						r <- gets randGen
+						sp <- gets sprouts
+						
+						good <- shouldSpawn t
+						
+						if not good then									-- Make sure it can spawn
+							return ()
+						else
+							do
+								-- We've determined we're spawning, is there a spot to actually do it?
+							
+								possibleSpots <- possibleSaplingPoints c
+							
+								if null possibleSpots then							-- Make sure there are spots
+									return ()
+								else
+									do
+										-- Yep, pick a spot, make the changes							
+
+										let (n, r') = randomR (0, (length possibleSpots - 1)) r
+										
+										setTree (possibleSpots !! n) (Just 0)		-- A new sapling
+										
+										modify (\s -> s{sprouts = sp + 1, randGen = r'})
+
 
 -- Check if the simulation is over (4800 months or no trees left)
 simulationOver :: ForrestFunction Bool
@@ -130,21 +157,6 @@ freePlots = do
 				f <- gets forrest
 				
 				return $ any isNothing (concat f)
-
--- Get the coords of every tree in the forrest that can spawn
-findSpawnableTrees :: ForrestFunction [Coords]
-findSpawnableTrees = do
-						f <- gets forrest
-						
-						let rowsWithYs		= addYCoords f								-- Turn [row] to [(row, Y-coord)]
-						let allWithXCoords	= map addXCoords rowsWithYs					-- Turn each row to [(PossibleTree, x, y)]
-						let asBigList		= concat allWithXCoords						-- Flatten that
-						let onlySpawnable	= filter (\(t, _, _) -> isMature t || isElder t) asBigList	-- Keep only trees that can spawn
-						
-						return $ map (\(t, x, y) -> (x, y)) onlySpawnable				-- Stip out the tree from each tuple						
-					where
-						addYCoords f = zip f [0,1..]
-						addXCoords (r, y) = zip3 r [0,1..] (repeat y)
 
 -- Get the tree at the given spot
 getTree :: Coords -> ForrestFunction PossibleTree
@@ -200,14 +212,51 @@ incrementTrees = do
 					updateTree (Just t)		= Just $ t + 1
 					updateRow				= map updateTree
 
--- Increment the month number, return if we're in a new year
-incrementMonth :: ForrestFunction Bool
+-- Increment the month number
+incrementMonth :: ForrestFunction ()
 incrementMonth = do
 					m <- gets month
 					
 					modify (\s -> s{month = m + 1})
+
+-- Record that a mauling happened
+handleMauling :: Bear -> ForrestFunction ()
+handleMauling b = do
+					ljs <- gets lumberjacks
+					m <- gets maulings
+					ym <- gets yearMaulings
+					bs <- gets bears
 					
-					return $ (m + 1) `mod` 12 == 0
+					let updatedLumberjacks = filter (\(c, _) -> c == fst b) ljs				-- Remove the LJ who was mauled
+					let updatedBears = map (\x@(c, t) -> if x == b then (c, 0) else x) bs	-- Mark that bear's turn as over
+					
+					modify (\s -> s{maulings = m + 1, yearMaulings = ym + 1,
+										lumberjacks = updatedLumberjacks, bears = updatedBears})
+					
+					if null updatedLumberjacks then
+						spawnLumberjack					-- Always need at least one LJ
+					else
+						return ()
+						
+-- Record that a harvest happened
+handleHarvest :: Lumberjack -> ForrestFunction ()
+handleHarvest lj = do
+					ljs <- gets lumberjacks
+					h <- gets harvests
+					yh <- gets yearHarvests
+					
+					setTree (fst lj) Nothing					-- Remove the tree
+					
+					let updatedLumberjacks = map (\x@(c, t) -> if x == lj then (c, 0) else x) ljs	-- Mark that LJ's turn over
+					
+					modify (\s -> s{harvests = h + 1, yearHarvests = yh + 1, lumberjacks = updatedLumberjacks})	-- Update state
+						
+-- Check if it's a new year
+isNewYear :: ForrestFunction Bool
+isNewYear = do
+				m <- gets month
+				
+				return $ m `mod` 12 == 0
 
 -- Clear the yearly stats
 clearYearlyStats :: ForrestFunction ()
