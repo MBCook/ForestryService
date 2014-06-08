@@ -8,6 +8,7 @@ import System.Random
 import System.IO
 import Data.Char
 import Data.Maybe
+import Text.Printf
 import Control.Monad
 import Control.Monad.Trans.State
 import Control.Monad.Trans
@@ -490,6 +491,64 @@ moveLumberjacks w = do
 				
 						calculateHarvests								-- Handle any possible harvests
 
+-- Print out the monthly stats
+printYearlyStats :: Int -> Int -> ForrestFunction ()
+printYearlyStats hired zooed = do
+									mo <- gets month						
+						
+									let y = mo `mod` 12						
+						
+									h <- gets yearHarvests
+									m <- gets yearMaulings
+						
+									bs <- gets bears
+									ljs <- gets lumberjacks
+						
+									(ns, nm, ne) <- countTrees
+												
+									liftIO $ printf "Year [%04d]: Forest has %d Trees, %d Saplings, %d Elder Trees, %d Lumberjacks and %d Bears.\n" y nm ns ne (length ljs) (length bs)
+									liftIO $ printf "Year [%04d]: %d Bears captured by zoo due to %d Maulings." zooed m									
+									liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested %d new Lumberjacks hired." h hired
+									
+-- Print out the yearly stats
+printMonthlyStats :: ForrestFunction ()
+printMonthlyStats = do
+						mo <- gets month
+						h <- gets harvests
+						s <- gets sprouts
+						ma <- gets matures
+						e <- gets elderly
+						mu <- gets maulings
+						
+						liftIO $ possiblePrintLn "Month" mo h "pieces of lumber harvested by Lumberjacks."
+						liftIO $ possiblePrintLn "Month" mo s "new Saplings created."
+						liftIO $ possiblePrintLn "Month" mo ma " Saplings became Trees."
+						liftIO $ possiblePrintLn "Month" mo e " Trees became Elder Trees."
+						liftIO $ possiblePrintLn "Month" mo mu " Lumberjacks were Maw'd by a bear."
+						
+-- Handle the basic formatting we do all the time, and only print if X is non-zero
+possiblePrintLn :: String -> Int -> Int -> String -> IO ()
+possiblePrintLn t m x s = do
+							if x == 0 then
+								return ()
+							else
+								printf "%s [%04d]: [%d] %s\n" t m x s
+
+-- Function that, once a year, does our yearly stuff
+possibleYearlyUpdate :: ForrestFunction ()
+possibleYearlyUpdate = do
+							newYear <- isNewYear
+							
+							if not newYear then
+								return ()
+							else
+								do
+									-- TODO: Spawn bears/LJs
+									
+									printYearlyStats 0 0					-- Print the year's events
+									
+									clearYearlyStats
+
 -- Do one month's worth of work
 monthlyUpdate :: ForrestFunction ()			
 monthlyUpdate = do
@@ -506,7 +565,27 @@ monthlyUpdate = do
 					modify (\s -> s{sprouts = newSap - oldSap,	-- Update tree counts
 									matures = newMat - oldMat,
 									elderly = newEld - oldEld})
+
+					mapM_ moveLumberjacks [3,2,1]				-- Move lumberjacks 3 times					
+					mapM_ moveBears [5,4..1]					-- Move bears 5 times
 					
+					frame <- drawForrest
+					
+					modify (\s -> s{frames = frame : (frames s)})	-- Draw a new GIF frame
+					
+					printMonthlyStats							-- Print this month's stats
+					
+					incrementMonth								-- Increment the month
+				
+					possibleYearlyUpdate						-- Possibly handle our yearly stuff
+					
+					done <- simulationOver
+					
+					if done then
+						return ()								-- If we're done don't go any further
+					else
+						monthlyUpdate							-- We've got more to do, do it again!
+
 					
 
 ------------------ Our main function, to do the work ------------------
