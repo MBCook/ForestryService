@@ -213,9 +213,9 @@ moveBear b@(c, w) = do
 simulationOver :: ForrestFunction Bool
 simulationOver = do
 					m <- gets month
-					(s, m, e) <- countTrees
+					(s, ma, e) <- countTrees
 					
-					return $ (m >= 4800) || (s + m + e == 0)
+					return $ (m >= 60) || (s + ma + e == 0)
 
 -- Check if there is anywhere for trees to grow
 freePlots :: ForrestFunction Bool
@@ -458,7 +458,9 @@ drawForrest = do
 				l <- gets lumberjacks
 				s <- gets size
 				
-				return $ generateImage (colorPixel f b l) s s
+				return $ generateImage (scaledColor f b l) (s * 5) (s * 5)
+			where
+				scaledColor f b l x y = colorPixel f b l (x `div` 5) (y `div` 5)
 
 -- Given the current forrest, list of bears, lumberjacks, and X/Y coords find the right pixel color
 colorPixel :: Forrest -> [Bear] -> [Lumberjack] -> Int -> Int -> Pixel8
@@ -496,7 +498,7 @@ printYearlyStats :: Int -> ForrestFunction ()
 printYearlyStats hired = do
 									mo <- gets month						
 						
-									let y = mo `mod` 12						
+									let y = mo `div` 12						
 						
 									h <- gets yearHarvests
 									m <- gets yearMaulings
@@ -509,14 +511,14 @@ printYearlyStats hired = do
 									liftIO $ printf "Year [%04d]: Forest has %d Trees, %d Saplings, %d Elder Trees, %d Lumberjacks and %d Bears.\n" y nm ns ne (length ljs) (length bs)
 									
 									if m > 0 then									
-										liftIO $ printf "Year [%04d]: 1 Bear captured by zoo due to %d Maulings." y m
+										liftIO $ printf "Year [%04d]: 1 Bear captured by zoo due to %d Maulings.\n" y m
 									else
-										liftIO $ printf "Year [%04d]: 1 Bear spawned since they had a clean year." y
+										liftIO $ printf "Year [%04d]: 1 Bear spawned since they had a clean year.\n" y
 									
 									if hired > 0 then
-										liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested %d new Lumberjacks hired." y hired
+										liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested %d new Lumberjacks hired.\n" y h hired
 									else
-										liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested 1 Lumberjack was let go." y hired										
+										liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested 1 Lumberjack was let go.\n" y h										
 									
 -- Print out the yearly stats
 printMonthlyStats :: ForrestFunction ()
@@ -528,6 +530,9 @@ printMonthlyStats = do
 						e <- gets elderly
 						mu <- gets maulings
 						
+						b <- gets bears
+						lj <- gets lumberjacks
+						
 						liftIO $ possiblePrintLn "Month" mo h "pieces of lumber harvested by Lumberjacks."
 						liftIO $ possiblePrintLn "Month" mo s "new Saplings created."
 						liftIO $ possiblePrintLn "Month" mo ma " Saplings became Trees."
@@ -537,7 +542,7 @@ printMonthlyStats = do
 -- Handle the basic formatting we do all the time, and only print if X is non-zero
 possiblePrintLn :: String -> Int -> Int -> String -> IO ()
 possiblePrintLn t m x s = do
-							if x == 0 then
+							if x <= 0 then
 								return ()
 							else
 								printf "%s [%04d]: [%d] %s\n" t m x s
@@ -588,6 +593,9 @@ monthlyUpdate :: ForrestFunction ()
 monthlyUpdate = do
 					clearMonthlyStats							-- Reset our counters
 					
+					restoreBearMoves							-- Set both to be able to move again
+					restoreLumberjackMoves
+					
 					(oldSap, oldMat, oldEld) <- countTrees		-- Figure out the 'old' counts
 					
 					incrementTrees								-- Make every tree older
@@ -619,26 +627,57 @@ monthlyUpdate = do
 						return ()								-- If we're done don't go any further
 					else
 						monthlyUpdate							-- We've got more to do, do it again!					
+						
+-- Generates an initial state for us
+initializeForrest :: ForrestFunction ()
+initializeForrest  = do
+						s <- gets size
+						
+						let blankForrest = replicate s (replicate s Nothing)	-- Empty forrest
+						
+						lumberjackCoords <- replicateM (s `div` 10) randomCoords
+						bearCoords <- replicateM (s `div` 50) randomCoords
+						
+						let ljs = zip lumberjackCoords (repeat 0)
+						let bs = zip bearCoords (repeat 0)
+						
+						modify (\s -> s{forrest = blankForrest, bears = bs, lumberjacks = ljs})
+						
+						-- Now we'll fill our forrest with trees
+						
+						treeCoords <- replicateM (s `div` 2) randomCoords
+						
+						mapM (flip setTree (Just 13)) treeCoords				-- Start with mature trees
+						
+						-- And setup the initial frame
+						
+						frame <- drawForrest
+					
+						modify (\s -> s{frames = [frame]})					
+
+-- Finishes initialization and runs everything
+runSimulation :: ForrestFunction ()
+runSimulation = do
+					initializeForrest
+					monthlyUpdate
 
 ------------------ Our main function, to do the work ------------------
 
 main = do
--- 	args <- getArgs
--- 	
--- 	putStrLn $ "Loading program from " ++ args !! 0
--- 	
--- 	(p, initialStack) <- loadProgram $ args !! 0
-	
 	putStrLn "Here is the program:"
+
+	randGen <- getStdGen
+
+	let initialState = ForrestState [] [] [] 0 0 0 0 0 0 0 0 randGen [] 100
 	
--- 	putStrLn $ showProgram p
--- 	
--- 	randGen <- getStdGen
--- 	
--- 	initialState <- return $ Interpreter initialStack (0, 0) p DRight False randGen True
--- 	
--- 	putStrLn "Starting the interpreter...\n"
--- 
--- 	runProgram initialState
--- 
--- 	putStrLn "\n\nWe're done"
+	putStrLn "Starting the interpreter...\n"
+	
+	result <- execStateT runSimulation initialState
+	
+	-- We have to write out our result image
+	
+	putStrLn "\nWriting out the image."
+	
+	let fin = writeGifImages "output.gif" LoopingNever $ map (\x -> (ourPallet, 10, x)) (reverse $ frames result)
+	
+	either  (\a -> putStrLn $ "Error saving gif: " ++ a) id fin 
