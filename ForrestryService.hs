@@ -36,9 +36,9 @@ type Forrest = [[PossibleTree]]
 type Frame = Image Pixel8
 
 data ForrestState = ForrestState {
-					forrest			:: Forrest,
-					lumberjacks		:: [Lumberjack],
-					bears			:: [Bear],
+					forrest			:: !Forrest,
+					lumberjacks		:: ![Lumberjack],
+					bears			:: ![Bear],
 					month			:: Int,
 					harvests		:: Int,
 					yearHarvests	:: Int,
@@ -48,7 +48,7 @@ data ForrestState = ForrestState {
 					maulings		:: Int,
 					yearMaulings	:: Int,
 					randGen			:: StdGen,
-					frames			:: [Frame],
+					frames			:: ![Frame],
 					size			:: Int
 				}
 
@@ -215,7 +215,7 @@ simulationOver = do
 					m <- gets month
 					(s, ma, e) <- countTrees
 					
-					return $ (m >= 60) || (s + ma + e == 0)
+					return $ (m >= 1200) || (s + ma + e == 0)
 
 -- Check if there is anywhere for trees to grow
 freePlots :: ForrestFunction Bool
@@ -246,7 +246,7 @@ neighboringCells :: Coords -> ForrestFunction [Coords]
 neighboringCells (x, y) = do
 						s <- gets size
 						
-						let possibilities = [(x + i, y + j) | i <- [-1..1], j <- [-1..1], i /= 0 && j /= 0]
+						let possibilities = [(x + i, y + j) | i <- [-1..1], j <- [-1..1], (abs i) + (abs j) /= 0]
 
 						return $ filter (\(x, y) -> x >= 0 && y >= 0 && x < s && y < s) possibilities
 
@@ -496,30 +496,30 @@ moveLumberjacks w = do
 -- Print out the monthly stats
 printYearlyStats :: Int -> ForrestFunction ()
 printYearlyStats hired = do
-									mo <- gets month						
-						
-									let y = mo `div` 12						
-						
-									h <- gets yearHarvests
-									m <- gets yearMaulings
-						
-									bs <- gets bears
-									ljs <- gets lumberjacks
-						
-									(ns, nm, ne) <- countTrees
-												
-									liftIO $ printf "Year [%04d]: Forest has %d Trees, %d Saplings, %d Elder Trees, %d Lumberjacks and %d Bears.\n" y nm ns ne (length ljs) (length bs)
-									
-									if m > 0 then									
-										liftIO $ printf "Year [%04d]: 1 Bear captured by zoo due to %d Maulings.\n" y m
-									else
-										liftIO $ printf "Year [%04d]: 1 Bear spawned since they had a clean year.\n" y
-									
-									if hired > 0 then
-										liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested %d new Lumberjacks hired.\n" y h hired
-									else
-										liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested 1 Lumberjack was let go.\n" y h										
-									
+							mo <- gets month						
+				
+							let y = mo `div` 12						
+				
+							h <- gets yearHarvests
+							m <- gets yearMaulings
+				
+							bs <- gets bears
+							ljs <- gets lumberjacks
+				
+							(ns, nm, ne) <- countTrees
+										
+							liftIO $ printf "Year [%04d]: Forest has %d Trees, %d Saplings, %d Elder Trees, %d Lumberjacks and %d Bears.\n" y nm ns ne (length ljs) (length bs)
+							
+							if m > 0 then									
+								liftIO $ printf "Year [%04d]: 1 Bear captured by zoo due to %d Maulings.\n" y m
+							else
+								liftIO $ printf "Year [%04d]: 1 Bear spawned since they had a clean year.\n" y
+							
+							if hired > 0 then
+								liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested %d new Lumberjacks hired.\n" y h hired
+							else
+								liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested 1 Lumberjack was let go.\n" y h										
+							
 -- Print out the yearly stats
 printMonthlyStats :: ForrestFunction ()
 printMonthlyStats = do
@@ -570,9 +570,9 @@ possibleYearlyUpdate = do
 									h <- gets yearHarvests
 									ljs <- gets lumberjacks
 
-									let needed = (h - length ljs) `div` 10 + 1		-- Each 10 extra lumber is 1 extra LJ
+									let needed = lumberjacksNeeded h (length ljs)
 									
-									if h >= (length ljs) then
+									if needed > 0 then
 										sequence_ (replicate needed spawnLumberjack)
 									else
 										fireLumberjack
@@ -584,9 +584,17 @@ possibleYearlyUpdate = do
 									else
 										return ()						-- We still have LJs, nothing special to do
 									
-									printYearlyStats needed					-- Print the year's events
+									printYearlyStats needed				-- Print the year's events
 									
 									clearYearlyStats					-- Clear the stats
+
+-- Figure out how many lumberjacks are needed
+lumberjacksNeeded :: Int -> Int -> Int
+lumberjacksNeeded h l
+					| h < l		= 0
+					| otherwise	= extra `div` 10 + 1 
+				where
+					extra = h - l
 
 -- Do one month's worth of work
 monthlyUpdate :: ForrestFunction ()			
