@@ -215,7 +215,7 @@ simulationOver = do
 					m <- gets month
 					(s, ma, e) <- countTrees
 					
-					return $ (m >= 1200) || (s + ma + e == 0)
+					return $ (m >= 300) || (s + ma + e == 0)
 
 -- Check if there is anywhere for trees to grow
 freePlots :: ForrestFunction Bool
