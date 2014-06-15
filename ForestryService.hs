@@ -7,38 +7,38 @@ import System.Environment
 import System.Random
 import System.IO
 import Data.Char
-import Data.Maybe
 import Text.Printf
 import Control.Monad
 import Control.Monad.Trans.State
 import Control.Monad.Trans
 import Codec.Picture.Gif
 import Codec.Picture.Types
+import qualified Data.Map.Lazy as M
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Unboxed.Mutable as MV
 
 ------------------ Some types we'll use ------------------
 
-type Tree = Int				-- Age in months, negative is nothing
+type Tree = Int								-- Age in months, negative is nothing
 
 type Coords = (Int, Int)
 
 type MovesLeft = Int
 
-type Moveable = (Coords, MovesLeft)
+type Moveables = M.Map Coords MovesLeft		-- Key is position value is moves left
 
-type Lumberjack = Moveable
+type Lumberjacks = Moveables
 
-type Bear = Moveable
+type Bears = Moveables
 
 type Forest = V.Vector Tree
 
 type Frame = Image Pixel8
 
 data ForestState = ForestState {
-					forest			:: !Forest,
-					lumberjacks		:: ![Lumberjack],
-					bears			:: ![Bear],
+					forest			:: Forest,
+					lumberjacks		:: Lumberjacks,
+					bears			:: Bears,
 					month			:: Int,
 					harvests		:: Int,
 					yearHarvests	:: Int,
@@ -48,7 +48,7 @@ data ForestState = ForestState {
 					maulings		:: Int,
 					yearMaulings	:: Int,
 					randGen			:: StdGen,
-					frames			:: ![Frame],
+					frames			:: [Frame],
 					size			:: Int
 				}
 
@@ -56,7 +56,10 @@ type ForestFunction a = StateT ForestState IO a
 
 ------------------ A bunch of constants to make our life easy ------------------
 
-monthsToRun			= 300		-- How long our simulation runs
+monthsToRun			= 600		-- How long our simulation runs
+
+bearMoves			= 5			-- How many squares bears wonder a month
+lumberjackMoves		= 3			-- How many squares an LJ can wonder in a month
 
 saplingMax			= 12		-- Maximum age of a sapling
 matureMax			= 120
@@ -169,62 +172,74 @@ calculateSprouts = do
 						
 						let coords = [(x, y) | x <- [0.. s - 1], y <- [0 .. s- 1]]
 						
-						mapM_ possiblySpawnTree coords			-- Run each coord through our spawner
+						mapM_ possiblySpawnTree coords								-- Run each coord through our spawner
 
 -- Find things who need to be moved the given number of spaces
-findThingsToMove :: Int -> (ForestState -> [Moveable]) -> ForestFunction [Moveable]
+findThingsToMove :: Int -> (ForestState -> Moveables) -> ForestFunction [Coords]
 findThingsToMove w f = do
-							ljs <- gets f								-- Use the accessor to get what we need
+							things <- gets f										-- Use the accessor to get what we need
 							
-							return $ filter (\lj -> snd lj == w) ljs	-- Filter to only those with that number of turns given
+							return $ M.keys $ M.filter ((==) w) things				-- Keep only those with w moves
 
 -- Move a lumberjack, assuming it's OK
-moveLumberjack :: Lumberjack -> ForestFunction ()
-moveLumberjack lj@(c, w) = do
-							ljs <- gets lumberjacks
-							
-							let otherLumberjacks = filter ((/=) lj) ljs
-							
-							possibleWalks <- neighboringCells c
-							
-							let withoutConflicts = filter (not . ljAtCoords otherLumberjacks) possibleWalks
-							
-							if null withoutConflicts then										-- They can't move, lose a turn
-								modify (\s -> s{lumberjacks = (c, w - 1) : otherLumberjacks})
-							else
-								do																-- They CAN move, find the spot
-									r <- gets randGen
-							
-									let (n, r') = randomR (0, (length withoutConflicts - 1)) r
-									let updatedLJ = (withoutConflicts !! n, w - 1)				-- New coords, one less walk left
-									
-									modify (\s -> s{lumberjacks = updatedLJ : otherLumberjacks, randGen = r'})
-						where
-							ljAtCoords ljs c = any (\(xy, _) -> xy == c) ljs
-
--- Move a bear, assuming it's OK
-moveBear :: Bear -> ForestFunction ()
-moveBear b@(c, w) = do
-						bs <- gets bears
-					
-						let otherBears = filter ((/=) b) bs
-					
+moveLumberjack :: Coords -> ForestFunction ()
+moveLumberjack c = do
+						ljs <- gets lumberjacks
+				
+						let w = (M.!) ljs  c
+				
 						possibleWalks <- neighboringCells c
-					
-						let withoutConflicts = filter (not . bAtCoords otherBears) possibleWalks
-					
+				
+						let withoutConflicts = filter (noLJAtCoords ljs) possibleWalks
+				
 						if null withoutConflicts then										-- They can't move, lose a turn
-							modify (\s -> s{bears = (c, w - 1) : otherBears})
+							do
+								let updatedLJs = changeWeight ljs c (w - 1)
+					
+								modify (\s -> s{lumberjacks = updatedLJs})
 						else
 							do																-- They CAN move, find the spot
 								r <- gets randGen
-					
+				
 								let (n, r') = randomR (0, (length withoutConflicts - 1)) r
-								let updatedB = (withoutConflicts !! n, w - 1)				-- New coords, one less walk left
-							
-								modify (\s -> s{bears = updatedB : otherBears, randGen = r'})
+						
+								let updatedLJs = changeLocation ljs c (withoutConflicts !! n) (w - 1)
+						
+								modify (\s -> s{lumberjacks = updatedLJs, randGen = r'})
 					where
-						bAtCoords bs c = any (\(xy, _) -> xy == c) bs
+						noLJAtCoords ljs c			= M.notMember c ljs						-- Check if there is an LJ there
+						changeWeight ljs c w		= M.insert c w ljs						-- Update a weight
+						changeLocation ljs co cn w	= M.insert cn w $ M.delete co ljs		-- Move an LJ, update weight
+
+-- Move a bear, assuming it's OK
+moveBear :: Coords -> ForestFunction ()
+moveBear c = do
+				bs <- gets bears
+			
+				let w = (M.!) bs  c
+			
+				possibleWalks <- neighboringCells c
+			
+				let withoutConflicts = filter (noBearsAtCoords bs) possibleWalks
+			
+				if null withoutConflicts then										-- They can't move, lose a turn
+					do
+						let updatedBears = changeWeight bs c (w - 1)
+			
+						modify (\s -> s{bears = updatedBears})
+				else
+					do																-- They CAN move, find the spot
+						r <- gets randGen
+			
+						let (n, r') = randomR (0, (length withoutConflicts - 1)) r
+				
+						let updatedBears = changeLocation bs c (withoutConflicts !! n) (w - 1)
+				
+						modify (\s -> s{bears = updatedBears, randGen = r'})
+			where
+				noBearsAtCoords bs c		= M.notMember c bs						-- Check if there is a bear there
+				changeWeight bs c w			= M.insert c w bs						-- Update a weight
+				changeLocation bs co cn w	= M.insert cn w $ M.delete co bs		-- Move a bear, update weight
 
 -- Check if the simulation is over (4800 months or no trees left)
 simulationOver :: ForestFunction Bool
@@ -306,33 +321,25 @@ calculateMaulings = do
 						bs <- gets bears
 						ljs <- gets lumberjacks
 						
-						let maulings = findMaulings bs ljs
+						let maulings = M.keys $ M.intersection bs ljs		-- List of spaces with both bears and lumberjacks
 						
-						mapM_ handleMauling maulings			-- Run each one through our mauling updater
-
--- Find the bears that are mauling people today
-findMaulings :: [Bear] -> [Lumberjack] -> [Bear]
-findMaulings [] _ = []
-findMaulings _ [] = []
-findMaulings (b:bs) ljs
-				| any (\x -> fst b == fst x) ljs	= b : (findMaulings bs ljs)
-				| otherwise							= findMaulings bs ljs
+						mapM_ handleMauling maulings						-- Run each one through our mauling updater
 
 -- Record that a mauling happened
-handleMauling :: Bear -> ForestFunction ()
-handleMauling b = do
+handleMauling :: Coords -> ForestFunction ()
+handleMauling c = do
 					ljs <- gets lumberjacks
 					m <- gets maulings
 					ym <- gets yearMaulings
 					bs <- gets bears
 					
-					let updatedLumberjacks = filter (\(c, _) -> c /= fst b) ljs				-- Remove the LJ who was mauled
-					let updatedBears = map (\x@(c, t) -> if x == b then (c, 0) else x) bs	-- Mark that bear's turn as over
+					let updatedLumberjacks = M.delete c ljs					-- Remove the injured lumberjack
+					let updatedBears = M.insert c 0 bs						-- Update bear to be done moving this month
 					
 					modify (\s -> s{maulings = m + 1, yearMaulings = ym + 1,
 										lumberjacks = updatedLumberjacks, bears = updatedBears})
 					
-					if null updatedLumberjacks then
+					if M.null updatedLumberjacks then
 						spawnLumberjack					-- Always need at least one LJ
 					else
 						return ()
@@ -342,34 +349,41 @@ calculateHarvests :: ForestFunction ()
 calculateHarvests = do
 						ljs <- gets lumberjacks
 						
-						ljsWithTrees <- mapM appendTree ljs									-- Append the tree in the LJ's position
+						let ljPositions = M.keys ljs
 						
-						let ljsWithTreesAndHarvests = filter (\(_, t) -> isMature t || isElder t) ljsWithTrees
+						ljsWithTrees <- mapM appendTree ljPositions							-- Append the tree in the LJ's position
+						
+						let ljsWithTreesAndHarvests = filter availableHarvest ljsWithTrees
 						
 						let harvests = map fst ljsWithTreesAndHarvests						-- Now that we've filtered, strip tree off
 						
 						mapM_ handleHarvest harvests			-- Run each one through our harvest updater		
 					where
-						appendTree lj = do
-											t <- getTree (fst lj)
-											return (lj, t)
+						availableHarvest (_, t) = isMature t || isElder t					-- Figure out if we can harvest here
+						appendTree lj			= do										-- Add tree to LJ to make calculations easy
+													t <- getTree lj
+													return (lj, t)
 
 -- Record that a harvest happened
-handleHarvest :: Lumberjack -> ForestFunction ()
-handleHarvest lj = do
+handleHarvest :: Coords -> ForestFunction ()
+handleHarvest c = do
 						ljs <- gets lumberjacks
 						h <- gets harvests
 						yh <- gets yearHarvests
 					
-						t <- getTree (fst lj)
+						t <- getTree c
+
+						let v = treeValue t
 					
-						setTree (fst lj) noTree					-- Remove the tree
+						setTree c noTree							-- Remove the tree
+						
+						let updatedLumberjacks = M.insert c 0 ljs	-- Mark that the LJ's turn is over
 					
-						let updatedLumberjacks = map (\x@(c, t) -> if x == lj then (c, 0) else x) ljs	-- Mark that LJ's turn over
-					
-						let v = if isElder t then 2 else 1			-- Remember that elderly trees are worth 2x
-					
-						modify (\s -> s{harvests = h + v, yearHarvests = yh + v, lumberjacks = updatedLumberjacks})	-- Update state
+						modify (\s -> s{harvests = h + v,			-- Update state
+										yearHarvests = yh + v,
+										lumberjacks = updatedLumberjacks})
+					where
+						treeValue t = if isElder t then 2 else 1	-- Figure out how much wood is being harvested
 						
 -- Check if it's a new year
 isNewYear :: ForestFunction Bool
@@ -402,64 +416,70 @@ randomCoords = do
 -- Spawn a bear
 spawnBear :: ForestFunction ()
 spawnBear = do
-				b <- gets bears
+				bs <- gets bears
 				
 				newCoords <- randomCoords
 				
-				modify (\s -> s{bears = (newCoords, 5):b})
+				let updatedBears = M.insert newCoords bearMoves bs
+				
+				modify (\s -> s{bears = updatedBears})
 
 -- Trap a bear
 trapBear :: ForestFunction ()
 trapBear = do
-				b <- gets bears
+				bs <- gets bears
 				
 				r <- gets randGen
 				
-				let (badBear, r') = randomR (0, (length b) - 1) r
+				let (badBear, r') = randomR (0, (M.size bs) - 1) r
 				
-				let (earlyBears, _:lateBears) = splitAt badBear b
+				let (badCoords, _) = M.elemAt badBear bs
 				
-				modify (\s -> s{bears = (earlyBears ++ lateBears)})
+				let updatedBears = M.delete badCoords bs
+
+				modify (\s -> s{bears = updatedBears})
 				
 -- Spawn a lumberjack
 spawnLumberjack :: ForestFunction ()
 spawnLumberjack = do
-					lj <- gets lumberjacks
+					ljs <- gets lumberjacks
 				
 					newCoords <- randomCoords
 				
-					modify (\s -> s{lumberjacks = (newCoords, 3):lj})
+					let updatedLumberjacks = M.insert newCoords lumberjackMoves ljs
+				
+					modify (\s -> s{lumberjacks = updatedLumberjacks})
 
 -- Fire a lumberjack
 fireLumberjack :: ForestFunction ()
 fireLumberjack = do
-					lj <- gets lumberjacks
+					ljs <- gets lumberjacks
 				
 					r <- gets randGen
 				
-					let (badLumberjack, r') = randomR (0, (length lj) - 1) r
+					let (badLumberjack, r') = randomR (0, (M.size ljs) - 1) r
 				
-					let (earlyLumberjacks, _:lateLumberjacks) = splitAt badLumberjack lj
+					let (badCoords, _) = M.elemAt badLumberjack ljs
 				
-					modify (\s -> s{lumberjacks = (earlyLumberjacks ++ lateLumberjacks)})
+					let updatedLumberjacks = M.delete badCoords ljs
+
+					modify (\s -> s{lumberjacks = updatedLumberjacks})
 
 -- Restore moves to bears
 restoreBearMoves :: ForestFunction ()
 restoreBearMoves = do
-					b <- gets bears
+					bs <- gets bears
 					
-					let withoutMoves = map fst b
-					let resetBears = zip withoutMoves (repeat 5)
+					let resetBears = M.map (\_ -> bearMoves) bs
 					
 					modify (\s -> s{bears = resetBears})
 
 -- Restore moves to lumberjacks
 restoreLumberjackMoves :: ForestFunction ()
 restoreLumberjackMoves = do
-							lj <- gets lumberjacks
+							ljs <- gets lumberjacks
 							
-							let withoutMoves = map fst lj
-							let resetLumberjacks = zip withoutMoves (repeat 3)
+							let resetLumberjacks = M.map (\_ -> lumberjackMoves) ljs
 							
 							modify (\s -> s{lumberjacks = resetLumberjacks})
 							
@@ -477,14 +497,14 @@ drawForest = do
 				scaledColor f s b l x y = colorPixel f s b l (oneFifth x, oneFifth y)
 
 -- Given the current forest, list of bears, lumberjacks, and X/Y coords find the right pixel color
-colorPixel :: Forest -> Int -> [Bear] -> [Lumberjack] -> (Int, Int) -> Pixel8
+colorPixel :: Forest -> Int -> Bears -> Lumberjacks -> (Int, Int) -> Pixel8
 colorPixel f s b l c
-				| isJust $ c `lookup` b	= bearColor
-				| isJust $ c `lookup` l	= lumberjackColor
-				| isSapling t			= saplingColor
-				| isMature t			= matureColor
-				| isElder t				= elderlyColor
-				| otherwise				= emptyColor
+				| c `M.member` b	= bearColor
+				| c `M.member` l	= lumberjackColor
+				| isSapling t		= saplingColor
+				| isMature t		= matureColor
+				| isElder t			= elderlyColor
+				| otherwise			= emptyColor
 		where
 			t = V.unsafeIndex f index
 			index = treeIndex c s					
@@ -522,7 +542,7 @@ printYearlyStats hired = do
 				
 							(ns, nm, ne) <- countTrees
 										
-							liftIO $ printf "Year [%04d]: Forest has %d Trees, %d Saplings, %d Elder Trees, %d Lumberjacks and %d Bears.\n" y nm ns ne (length ljs) (length bs)
+							liftIO $ printf "Year [%04d]: Forest has %d Trees, %d Saplings, %d Elder Trees, %d Lumberjacks and %d Bears.\n" y nm ns ne (M.size ljs) (M.size bs)
 							
 							if m > 0 then									
 								liftIO $ printf "Year [%04d]: 1 Bear captured by zoo due to %d Maulings.\n" y m
@@ -543,9 +563,6 @@ printMonthlyStats = do
 						ma <- gets matures
 						e <- gets elderly
 						mu <- gets maulings
-						
-						b <- gets bears
-						lj <- gets lumberjacks
 						
 						liftIO $ possiblePrintLn "Month" mo h "pieces of lumber harvested by Lumberjacks."
 						liftIO $ possiblePrintLn "Month" mo s "new Saplings created."
@@ -584,7 +601,7 @@ possibleYearlyUpdate = do
 									h <- gets yearHarvests
 									ljs <- gets lumberjacks
 
-									let needed = lumberjacksNeeded h (length ljs)
+									let needed = lumberjacksNeeded h (M.size ljs)
 									
 									if needed > 0 then
 										sequence_ (replicate needed spawnLumberjack)
@@ -593,7 +610,7 @@ possibleYearlyUpdate = do
 										
 									newLjs <- gets lumberjacks
 									
-									if length newLjs == 0 then
+									if M.null newLjs then
 										spawnLumberjack					-- Never run out of lumberjacks
 									else
 										return ()						-- We still have LJs, nothing special to do
@@ -663,7 +680,7 @@ initializeForest  = do
 						let ljs = zip lumberjackCoords (repeat 0)
 						let bs = zip bearCoords (repeat 0)
 						
-						modify (\s -> s{forest = blankForest, bears = bs, lumberjacks = ljs})
+						modify (\s -> s{forest = blankForest, bears = M.fromList bs, lumberjacks = M.fromList ljs})
 						
 						-- Now we'll fill our forest with trees
 						
@@ -690,7 +707,7 @@ main = do
 
 	randGen <- getStdGen
 
-	let initialState = ForestState V.empty [] [] 0 0 0 0 0 0 0 0 randGen [] forestSize
+	let initialState = ForestState V.empty M.empty M.empty 0 0 0 0 0 0 0 0 randGen [] forestSize
 	
 	putStrLn "Starting the interpreter...\n"
 	
