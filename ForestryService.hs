@@ -14,8 +14,7 @@ import Control.Monad.Trans.State
 import Control.Monad.Trans
 import Codec.Picture.Gif
 import Codec.Picture.Types
-import qualified Data.Vector.Generic as V
-import qualified Data.Vector.Unboxed as UV
+import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Unboxed.Mutable as MV
 
 ------------------ Some types we'll use ------------------
@@ -32,9 +31,7 @@ type Lumberjack = Moveable
 
 type Bear = Moveable
 
-type ImmutableForrest = UV.Vector Tree
-
-type Forrest = MV.IOVector Tree
+type Forrest = V.Vector Tree
 
 type Frame = Image Pixel8
 
@@ -56,6 +53,19 @@ data ForrestState = ForrestState {
 				}
 
 type ForrestFunction a = StateT ForrestState IO a
+
+------------------ A bunch of constants to make our life easy ------------------
+
+monthsToRun			= 300		-- How long our simulation runs
+
+saplingMax			= 12		-- Maximum age of a sapling
+matureMax			= 120
+
+matureTree			= 13		-- Age to spawn mature trees at
+noTree				= -1		-- Age of 'no tree'
+
+matureSpawnOfTen	= 1			-- 10% chance of a mature tree spawning
+elderSpawnOfTen		= 2			-- 20% chance of elder tree spawning
 
 ------------------ Static palette we'll use for everything ------------------
 
@@ -80,13 +90,13 @@ emptyColor 		= 5
 ------------------ Functions to work on our types ------------------
 
 isSapling :: Tree -> Bool
-isSapling t = t >= 0 && t < 12
+isSapling t = t >= 0 && t <= saplingMax
 
 isMature :: Tree -> Bool
-isMature t = t > 12 && t <= 120
+isMature t = t > saplingMax && t <= matureMax
 
 isElder :: Tree -> Bool
-isElder t = t > 120
+isElder t = t > matureMax
 
 isClear :: Tree -> Bool
 isClear t = t < 0
@@ -101,10 +111,10 @@ shouldSpawn t = do
 					modify (\s -> s{randGen = r'})
 					
 					case t of _
-							| isSapling t	-> return False		-- Saplings can't spawn
-							| isMature t	-> return $ n == 1	-- Mature have 10% chance at spawn each month
-							| isElder t		-> return $ n <= 2	-- Elders have 20% chance at spawn each month
-							| otherwise		-> return False		-- No tree means no spawn
+							| isSapling t	-> return False							-- Saplings can't spawn
+							| isMature t	-> return $ n == matureSpawnOfTen	-- Mature have 10% chance at spawn each month
+							| isElder t		-> return $ n <= elderSpawnOfTen		-- Elders have 20% chance at spawn each month
+							| otherwise		-> return False							-- No tree means no spawn
 						
 -- Given a tree at coords, get the coords it can spawn at. Assume it's allowed to spawn.
 possibleSaplingPoints :: Coords -> ForrestFunction [Coords]
@@ -216,7 +226,7 @@ simulationOver = do
 					m <- gets month
 					(s, ma, e) <- countTrees
 					
-					return $ (m >= 300) || (s + ma + e == 0)
+					return $ (m >= monthsToRun) || (s + ma + e == 0)
 
 -- Find the index for the given tree in our vector
 treeIndex :: Coords -> Int -> Int
@@ -230,9 +240,7 @@ getTree c = do
 			
 				let index = treeIndex c s
 			
-				t <- liftIO $ V.unsafeIndex f index
-				
-				return t
+				return $ V.unsafeIndex f index
 
 -- Change a tree
 setTree :: Coords -> Tree -> ForrestFunction ()
@@ -240,7 +248,11 @@ setTree c t = do
 				f <- gets forrest
 				s <- gets size
 				
-				liftIO $ MV.unsafeWrite f (treeIndex c s) t
+				let index = (treeIndex c s)
+				
+				let f' = V.modify (\v -> MV.write v index t) f
+				
+				modify (\s -> s{forrest = f'})
 					
 -- Find the coords of all the neighboring cells
 neighboringCells :: Coords -> ForrestFunction [Coords]
@@ -269,7 +281,9 @@ incrementTrees :: ForrestFunction ()
 incrementTrees = do
 					f <- gets forrest
 					
-					liftIO $ MV.copy f $ V.map updateTree f
+					let f' = V.map updateTree f
+					
+					modify (\s -> s{forrest = f'})
 				where
 					updateTree t = if isClear t then t else t + 1
 
@@ -350,8 +364,6 @@ handleHarvest lj = do
 						let v = if isElder t then 2 else 1			-- Remember that elderly trees are worth 2x
 					
 						modify (\s -> s{harvests = h + v, yearHarvests = yh + v, lumberjacks = updatedLumberjacks})	-- Update state
-					where
-						noTree = -1
 						
 -- Check if it's a new year
 isNewYear :: ForrestFunction Bool
@@ -453,14 +465,12 @@ drawForrest = do
 				l <- gets lumberjacks
 				s <- gets size
 				
-				ff <- liftIO $ V.freeze f				-- Get an immutable copy we can index without IO
-				
-				return $ generateImage (scaledColor ff s b l) (s * 5) (s * 5)
+				return $ generateImage (scaledColor f s b l) (s * 5) (s * 5)
 			where
-				scaledColor ff s b l x y = colorPixel ff s b l (x `div` 5, y `div` 5)
+				scaledColor f s b l x y = colorPixel f s b l (x `div` 5, y `div` 5)
 
 -- Given the current forrest, list of bears, lumberjacks, and X/Y coords find the right pixel color
-colorPixel :: ImmutableForrest -> Int -> [Bear] -> [Lumberjack] -> (Int, Int) -> Pixel8
+colorPixel :: Forrest -> Int -> [Bear] -> [Lumberjack] -> (Int, Int) -> Pixel8
 colorPixel f s b l c
 				| isJust $ c `lookup` b	= bearColor
 				| isJust $ c `lookup` l	= lumberjackColor
@@ -469,7 +479,8 @@ colorPixel f s b l c
 				| isElder t				= elderlyColor
 				| otherwise				= emptyColor
 		where
-			t = V.unsafeIndex f $ treeIndex c s							
+			t = V.unsafeIndex f index
+			index = treeIndex c s					
 
 -- Move the bears who have w moves left
 moveBears :: Int -> ForrestFunction ()
@@ -637,7 +648,7 @@ initializeForrest :: ForrestFunction ()
 initializeForrest  = do
 						s <- gets size
 						
-						let blankForrest = V.replicate s noTree	-- Empty forrest
+						let blankForrest = V.replicate (s * s) noTree		-- Empty forrest
 						
 						lumberjackCoords <- replicateM (s `div` 10) randomCoords
 						bearCoords <- replicateM (s `div` 50) randomCoords
@@ -651,16 +662,13 @@ initializeForrest  = do
 						
 						treeCoords <- replicateM (s `div` 2) randomCoords
 						
-						mapM (flip setTree matureTree) treeCoords				-- Start with mature trees
+						mapM (flip setTree matureTree) treeCoords	-- Start with mature trees
 						
 						-- And setup the initial frame
 						
 						frame <- drawForrest
 					
 						modify (\s -> s{frames = [frame]})	
-					where
-						noTree		= -1				
-						matureTree	= 13
 
 -- Finishes initialization and runs everything
 runSimulation :: ForrestFunction ()
@@ -675,9 +683,7 @@ main = do
 
 	randGen <- getStdGen
 
-	emptyForest <- liftIO $ MV.new 0
-
-	let initialState = ForrestState emptyForest [] [] 0 0 0 0 0 0 0 0 randGen [] 100
+	let initialState = ForrestState V.empty [] [] 0 0 0 0 0 0 0 0 randGen [] 100
 	
 	putStrLn "Starting the interpreter...\n"
 	
