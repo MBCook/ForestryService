@@ -1,4 +1,4 @@
--- Simulates a forrest
+-- Simulates a forest
 -- Challenge from: http://www.reddit.com/r/dailyprogrammer/comments/27h53e/662014_challenge_165_hard_simulated_ecology_the/
 
 -- I'm getting this state monad thing, let's also make an animated gif!
@@ -31,12 +31,12 @@ type Lumberjack = Moveable
 
 type Bear = Moveable
 
-type Forrest = V.Vector Tree
+type Forest = V.Vector Tree
 
 type Frame = Image Pixel8
 
-data ForrestState = ForrestState {
-					forrest			:: !Forrest,
+data ForestState = ForestState {
+					forest			:: !Forest,
 					lumberjacks		:: ![Lumberjack],
 					bears			:: ![Bear],
 					month			:: Int,
@@ -52,7 +52,7 @@ data ForrestState = ForrestState {
 					size			:: Int
 				}
 
-type ForrestFunction a = StateT ForrestState IO a
+type ForestFunction a = StateT ForestState IO a
 
 ------------------ A bunch of constants to make our life easy ------------------
 
@@ -102,7 +102,7 @@ isClear :: Tree -> Bool
 isClear t = t < 0
 
 -- Check if the tree should generate a sapling this month
-shouldSpawn :: Tree -> ForrestFunction Bool
+shouldSpawn :: Tree -> ForestFunction Bool
 shouldSpawn t = do
 					r <- gets randGen
 					
@@ -111,24 +111,24 @@ shouldSpawn t = do
 					modify (\s -> s{randGen = r'})
 					
 					case t of _
-							| isSapling t	-> return False							-- Saplings can't spawn
+							| isSapling t	-> return False						-- Saplings can't spawn
 							| isMature t	-> return $ n == matureSpawnOfTen	-- Mature have 10% chance at spawn each month
-							| isElder t		-> return $ n <= elderSpawnOfTen		-- Elders have 20% chance at spawn each month
-							| otherwise		-> return False							-- No tree means no spawn
+							| isElder t		-> return $ n <= elderSpawnOfTen	-- Elders have 20% chance at spawn each month
+							| otherwise		-> return False						-- No tree means no spawn
 						
 -- Given a tree at coords, get the coords it can spawn at. Assume it's allowed to spawn.
-possibleSaplingPoints :: Coords -> ForrestFunction [Coords]
+possibleSaplingPoints :: Coords -> ForestFunction [Coords]
 possibleSaplingPoints c = do
-							neighboringCoords <- neighboringCells c					-- Neighboring cells
-							neighboringTrees <- mapM getTree neighboringCoords		-- Neighboring trees
+							neighboringCoords <- neighboringCells c				-- Neighboring cells
+							neighboringTrees <- mapM getTree neighboringCoords	-- Neighboring trees
 							
-							let pairs = zip neighboringCoords neighboringTrees		-- Match 'em together so we can filter
-							let goodPairs = filter (isClear . snd) pairs			-- Take only empty spots
+							let pairs = zip neighboringCoords neighboringTrees	-- Match 'em together so we can filter
+							let goodPairs = filter (isClear . snd) pairs		-- Take only empty spots
 
-							return $ map fst goodPairs								-- Return only the coords
+							return $ map fst goodPairs							-- Return only the coords
 
 -- Spawn a tree at a random location if possible
-possiblySpawnTree :: Coords -> ForrestFunction ()
+possiblySpawnTree :: Coords -> ForestFunction ()
 possiblySpawnTree c = do
 						t <- getTree c
 						r <- gets randGen
@@ -157,7 +157,7 @@ possiblySpawnTree c = do
 										modify (\s -> s{sprouts = sp + 1, randGen = r'})
 
 -- Sprout all trees that need it and can
-calculateSprouts :: ForrestFunction ()
+calculateSprouts :: ForestFunction ()
 calculateSprouts = do
 						s <- gets size
 						
@@ -166,14 +166,14 @@ calculateSprouts = do
 						mapM_ possiblySpawnTree coords			-- Run each coord through our spawner
 
 -- Find things who need to be moved the given number of spaces
-findThingsToMove :: Int -> (ForrestState -> [Moveable]) -> ForrestFunction [Moveable]
+findThingsToMove :: Int -> (ForestState -> [Moveable]) -> ForestFunction [Moveable]
 findThingsToMove w f = do
 							ljs <- gets f								-- Use the accessor to get what we need
 							
 							return $ filter (\lj -> snd lj == w) ljs	-- Filter to only those with that number of turns given
 
 -- Move a lumberjack, assuming it's OK
-moveLumberjack :: Lumberjack -> ForrestFunction ()
+moveLumberjack :: Lumberjack -> ForestFunction ()
 moveLumberjack lj@(c, w) = do
 							ljs <- gets lumberjacks
 							
@@ -197,7 +197,7 @@ moveLumberjack lj@(c, w) = do
 							ljAtCoords ljs c = any (\(xy, _) -> xy == c) ljs
 
 -- Move a bear, assuming it's OK
-moveBear :: Bear -> ForrestFunction ()
+moveBear :: Bear -> ForestFunction ()
 moveBear b@(c, w) = do
 						bs <- gets bears
 					
@@ -221,7 +221,7 @@ moveBear b@(c, w) = do
 						bAtCoords bs c = any (\(xy, _) -> xy == c) bs
 
 -- Check if the simulation is over (4800 months or no trees left)
-simulationOver :: ForrestFunction Bool
+simulationOver :: ForestFunction Bool
 simulationOver = do
 					m <- gets month
 					(s, ma, e) <- countTrees
@@ -233,9 +233,9 @@ treeIndex :: Coords -> Int -> Int
 treeIndex (x, y) s = y * s + x
 
 -- Get the tree at the given spot
-getTree :: Coords -> ForrestFunction Tree
+getTree :: Coords -> ForestFunction Tree
 getTree c = do
-				f <- gets forrest
+				f <- gets forest
 				s <- gets size
 			
 				let index = treeIndex c s
@@ -243,19 +243,19 @@ getTree c = do
 				return $ V.unsafeIndex f index
 
 -- Change a tree
-setTree :: Coords -> Tree -> ForrestFunction ()
+setTree :: Coords -> Tree -> ForestFunction ()
 setTree c t = do
-				f <- gets forrest
+				f <- gets forest
 				s <- gets size
 				
 				let index = (treeIndex c s)
 				
 				let f' = V.modify (\v -> MV.write v index t) f
 				
-				modify (\s -> s{forrest = f'})
+				modify (\s -> s{forest = f'})
 					
 -- Find the coords of all the neighboring cells
-neighboringCells :: Coords -> ForrestFunction [Coords]
+neighboringCells :: Coords -> ForestFunction [Coords]
 neighboringCells (x, y) = do
 						s <- gets size
 						
@@ -264,9 +264,9 @@ neighboringCells (x, y) = do
 						return $ filter (\(x, y) -> x >= 0 && y >= 0 && x < s && y < s) possibilities
 
 -- Count the number of trees in each state
-countTrees :: ForrestFunction (Int, Int, Int)
+countTrees :: ForestFunction (Int, Int, Int)
 countTrees = do
-				f <- gets forrest
+				f <- gets forest
 
 				return $ V.foldl' countingFunc (0, 0, 0) f 					-- Use a fold to sum up our trees
 			where
@@ -276,26 +276,26 @@ countTrees = do
 									| isElder t		= (s, m, e + 1)
 									| otherwise		= (s, m, e)
 
--- Increment the age of all the trees in the forrest
-incrementTrees :: ForrestFunction ()
+-- Increment the age of all the trees in the forest
+incrementTrees :: ForestFunction ()
 incrementTrees = do
-					f <- gets forrest
+					f <- gets forest
 					
 					let f' = V.map updateTree f
 					
-					modify (\s -> s{forrest = f'})
+					modify (\s -> s{forest = f'})
 				where
 					updateTree t = if isClear t then t else t + 1
 
 -- Increment the month number
-incrementMonth :: ForrestFunction ()
+incrementMonth :: ForestFunction ()
 incrementMonth = do
 					m <- gets month
 					
 					modify (\s -> s{month = m + 1})
 
 -- Figure out and handle all possible maulings
-calculateMaulings :: ForrestFunction ()
+calculateMaulings :: ForestFunction ()
 calculateMaulings = do
 						bs <- gets bears
 						ljs <- gets lumberjacks
@@ -313,7 +313,7 @@ findMaulings (b:bs) ljs
 				| otherwise							= findMaulings bs ljs
 
 -- Record that a mauling happened
-handleMauling :: Bear -> ForrestFunction ()
+handleMauling :: Bear -> ForestFunction ()
 handleMauling b = do
 					ljs <- gets lumberjacks
 					m <- gets maulings
@@ -332,7 +332,7 @@ handleMauling b = do
 						return ()
 		
 -- Figure out and handle all possible harvests
-calculateHarvests :: ForrestFunction ()
+calculateHarvests :: ForestFunction ()
 calculateHarvests = do
 						ljs <- gets lumberjacks
 						
@@ -349,7 +349,7 @@ calculateHarvests = do
 											return (lj, t)
 
 -- Record that a harvest happened
-handleHarvest :: Lumberjack -> ForrestFunction ()
+handleHarvest :: Lumberjack -> ForestFunction ()
 handleHarvest lj = do
 						ljs <- gets lumberjacks
 						h <- gets harvests
@@ -366,22 +366,22 @@ handleHarvest lj = do
 						modify (\s -> s{harvests = h + v, yearHarvests = yh + v, lumberjacks = updatedLumberjacks})	-- Update state
 						
 -- Check if it's a new year
-isNewYear :: ForrestFunction Bool
+isNewYear :: ForestFunction Bool
 isNewYear = do
 				m <- gets month
 				
 				return $ m `mod` 12 == 0
 
 -- Clear the yearly stats
-clearYearlyStats :: ForrestFunction ()
+clearYearlyStats :: ForestFunction ()
 clearYearlyStats = modify (\s -> s{yearHarvests = 0, yearMaulings = 0})
 
 -- Clear the monthly stats
-clearMonthlyStats :: ForrestFunction ()
+clearMonthlyStats :: ForestFunction ()
 clearMonthlyStats = modify (\s -> s{harvests = 0, sprouts = 0, matures = 0, elderly = 0, maulings = 0})
 
 -- Generate random coords that are in bounds
-randomCoords :: ForrestFunction Coords
+randomCoords :: ForestFunction Coords
 randomCoords = do
 				s <- gets size
 				r <- gets randGen
@@ -394,7 +394,7 @@ randomCoords = do
 				return (x, y)
 
 -- Spawn a bear
-spawnBear :: ForrestFunction ()
+spawnBear :: ForestFunction ()
 spawnBear = do
 				b <- gets bears
 				
@@ -403,7 +403,7 @@ spawnBear = do
 				modify (\s -> s{bears = (newCoords, 5):b})
 
 -- Trap a bear
-trapBear :: ForrestFunction ()
+trapBear :: ForestFunction ()
 trapBear = do
 				b <- gets bears
 				
@@ -416,7 +416,7 @@ trapBear = do
 				modify (\s -> s{bears = (earlyBears ++ lateBears)})
 				
 -- Spawn a lumberjack
-spawnLumberjack :: ForrestFunction ()
+spawnLumberjack :: ForestFunction ()
 spawnLumberjack = do
 					lj <- gets lumberjacks
 				
@@ -425,7 +425,7 @@ spawnLumberjack = do
 					modify (\s -> s{lumberjacks = (newCoords, 3):lj})
 
 -- Fire a lumberjack
-fireLumberjack :: ForrestFunction ()
+fireLumberjack :: ForestFunction ()
 fireLumberjack = do
 					lj <- gets lumberjacks
 				
@@ -438,7 +438,7 @@ fireLumberjack = do
 					modify (\s -> s{lumberjacks = (earlyLumberjacks ++ lateLumberjacks)})
 
 -- Restore moves to bears
-restoreBearMoves :: ForrestFunction ()
+restoreBearMoves :: ForestFunction ()
 restoreBearMoves = do
 					b <- gets bears
 					
@@ -448,7 +448,7 @@ restoreBearMoves = do
 					modify (\s -> s{bears = resetBears})
 
 -- Restore moves to lumberjacks
-restoreLumberjackMoves :: ForrestFunction ()
+restoreLumberjackMoves :: ForestFunction ()
 restoreLumberjackMoves = do
 							lj <- gets lumberjacks
 							
@@ -457,10 +457,10 @@ restoreLumberjackMoves = do
 							
 							modify (\s -> s{lumberjacks = resetLumberjacks})
 							
--- Draw the forrest into an image using our pallet
-drawForrest :: ForrestFunction Frame
-drawForrest = do
-				f <- gets forrest
+-- Draw the forest into an image using our pallet
+drawForest :: ForestFunction Frame
+drawForest = do
+				f <- gets forest
 				b <- gets bears
 				l <- gets lumberjacks
 				s <- gets size
@@ -469,8 +469,8 @@ drawForrest = do
 			where
 				scaledColor f s b l x y = colorPixel f s b l (x `div` 5, y `div` 5)
 
--- Given the current forrest, list of bears, lumberjacks, and X/Y coords find the right pixel color
-colorPixel :: Forrest -> Int -> [Bear] -> [Lumberjack] -> (Int, Int) -> Pixel8
+-- Given the current forest, list of bears, lumberjacks, and X/Y coords find the right pixel color
+colorPixel :: Forest -> Int -> [Bear] -> [Lumberjack] -> (Int, Int) -> Pixel8
 colorPixel f s b l c
 				| isJust $ c `lookup` b	= bearColor
 				| isJust $ c `lookup` l	= lumberjackColor
@@ -483,7 +483,7 @@ colorPixel f s b l c
 			index = treeIndex c s					
 
 -- Move the bears who have w moves left
-moveBears :: Int -> ForrestFunction ()
+moveBears :: Int -> ForestFunction ()
 moveBears w = do
 				bears <- findThingsToMove w bears				-- Find the bears who need to move
 				
@@ -492,7 +492,7 @@ moveBears w = do
 				calculateMaulings								-- Handle any possible maulings
 
 -- Move the lumberjacks who have w moves left
-moveLumberjacks :: Int -> ForrestFunction ()
+moveLumberjacks :: Int -> ForestFunction ()
 moveLumberjacks w = do
 						lumberjacks <- findThingsToMove w lumberjacks	-- Find the LJs who need to move
 				
@@ -501,7 +501,7 @@ moveLumberjacks w = do
 						calculateHarvests								-- Handle any possible harvests
 
 -- Print out the monthly stats
-printYearlyStats :: Int -> ForrestFunction ()
+printYearlyStats :: Int -> ForestFunction ()
 printYearlyStats hired = do
 							mo <- gets month						
 				
@@ -528,7 +528,7 @@ printYearlyStats hired = do
 								liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested 1 Lumberjack was let go.\n" y h										
 							
 -- Print out the yearly stats
-printMonthlyStats :: ForrestFunction ()
+printMonthlyStats :: ForestFunction ()
 printMonthlyStats = do
 						mo <- gets month
 						h <- gets harvests
@@ -555,7 +555,7 @@ possiblePrintLn t m x s = do
 								printf "%s [%04d]: [%d] %s\n" t m x s
 
 -- Function that, once a year, does our yearly stuff
-possibleYearlyUpdate :: ForrestFunction ()
+possibleYearlyUpdate :: ForestFunction ()
 possibleYearlyUpdate = do
 							newYear <- isNewYear
 							
@@ -604,8 +604,8 @@ lumberjacksNeeded h l
 					extra = h - l
 
 -- Do one month's worth of work
-monthlyUpdate :: ForrestFunction ()			
-monthlyUpdate = do
+monthlyUpdate :: ForestFunction ()			
+monthlyUpdate = do					
 					clearMonthlyStats							-- Reset our counters
 					
 					restoreBearMoves							-- Set both to be able to move again
@@ -626,14 +626,14 @@ monthlyUpdate = do
 					mapM_ moveLumberjacks [3,2,1]				-- Move lumberjacks 3 times					
 					mapM_ moveBears [5,4..1]					-- Move bears 5 times
 					
-					frame <- drawForrest
+					frame <- drawForest
 					
 					modify (\s -> s{frames = frame : (frames s)})	-- Draw a new GIF frame
 					
 					printMonthlyStats							-- Print this month's stats
 					
 					incrementMonth								-- Increment the month
-				
+
 					possibleYearlyUpdate						-- Possibly handle our yearly stuff
 					
 					done <- simulationOver
@@ -644,11 +644,11 @@ monthlyUpdate = do
 						monthlyUpdate							-- We've got more to do, do it again!					
 						
 -- Generates an initial state for us
-initializeForrest :: ForrestFunction ()
-initializeForrest  = do
+initializeForest :: ForestFunction ()
+initializeForest  = do
 						s <- gets size
 						
-						let blankForrest = V.replicate (s * s) noTree		-- Empty forrest
+						let blankForest = V.replicate (s * s) noTree		-- Empty forest
 						
 						lumberjackCoords <- replicateM (s `div` 10) randomCoords
 						bearCoords <- replicateM (s `div` 50) randomCoords
@@ -656,9 +656,9 @@ initializeForrest  = do
 						let ljs = zip lumberjackCoords (repeat 0)
 						let bs = zip bearCoords (repeat 0)
 						
-						modify (\s -> s{forrest = blankForrest, bears = bs, lumberjacks = ljs})
+						modify (\s -> s{forest = blankForest, bears = bs, lumberjacks = ljs})
 						
-						-- Now we'll fill our forrest with trees
+						-- Now we'll fill our forest with trees
 						
 						treeCoords <- replicateM (s `div` 2) randomCoords
 						
@@ -666,14 +666,14 @@ initializeForrest  = do
 						
 						-- And setup the initial frame
 						
-						frame <- drawForrest
+						frame <- drawForest
 					
 						modify (\s -> s{frames = [frame]})	
 
 -- Finishes initialization and runs everything
-runSimulation :: ForrestFunction ()
+runSimulation :: ForestFunction ()
 runSimulation = do
-					initializeForrest
+					initializeForest
 					monthlyUpdate
 
 ------------------ Our main function, to do the work ------------------
@@ -683,7 +683,7 @@ main = do
 
 	randGen <- getStdGen
 
-	let initialState = ForrestState V.empty [] [] 0 0 0 0 0 0 0 0 randGen [] 100
+	let initialState = ForestState V.empty [] [] 0 0 0 0 0 0 0 0 randGen [] 100
 	
 	putStrLn "Starting the interpreter...\n"
 	
