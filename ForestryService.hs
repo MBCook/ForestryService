@@ -56,7 +56,7 @@ type ForestFunction a = StateT ForestState IO a
 
 ------------------ A bunch of constants to make our life easy ------------------
 
-monthsToRun			= 300		-- How long our simulation runs
+monthsToRun			= 200		-- How long our simulation runs
 
 saplingMax			= 12		-- Maximum age of a sapling
 matureMax			= 120
@@ -320,7 +320,7 @@ handleMauling b = do
 					ym <- gets yearMaulings
 					bs <- gets bears
 					
-					let updatedLumberjacks = filter (\(c, _) -> c == fst b) ljs				-- Remove the LJ who was mauled
+					let updatedLumberjacks = filter (\(c, _) -> c /= fst b) ljs				-- Remove the LJ who was mauled
 					let updatedBears = map (\x@(c, t) -> if x == b then (c, 0) else x) bs	-- Mark that bear's turn as over
 					
 					modify (\s -> s{maulings = m + 1, yearMaulings = ym + 1,
@@ -467,7 +467,8 @@ drawForest = do
 				
 				return $ generateImage (scaledColor f s b l) (s * 5) (s * 5)
 			where
-				scaledColor f s b l x y = colorPixel f s b l (x `div` 5, y `div` 5)
+				oneFifth i = i `div` 5
+				scaledColor f s b l x y = colorPixel f s b l (oneFifth x, oneFifth y)
 
 -- Given the current forest, list of bears, lumberjacks, and X/Y coords find the right pixel color
 colorPixel :: Forest -> Int -> [Bear] -> [Lumberjack] -> (Int, Int) -> Pixel8
