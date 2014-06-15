@@ -56,7 +56,7 @@ type ForestFunction a = StateT ForestState IO a
 
 ------------------ A bunch of constants to make our life easy ------------------
 
-monthsToRun			= 200		-- How long our simulation runs
+monthsToRun			= 300		-- How long our simulation runs
 
 saplingMax			= 12		-- Maximum age of a sapling
 matureMax			= 120
@@ -66,6 +66,12 @@ noTree				= -1		-- Age of 'no tree'
 
 matureSpawnOfTen	= 1			-- 10% chance of a mature tree spawning
 elderSpawnOfTen		= 2			-- 20% chance of elder tree spawning
+
+forestSize			= 100		-- Size of each side of the forrest (total spots is ^2)
+
+lumberjackStarts	= forestSize `div` 10	-- Starting LJs
+bearStarts			= forestSize `div` 50	-- Starting bears
+treeStarts			= forestSize `div` 2	-- Starting trees
 
 ------------------ Static palette we'll use for everything ------------------
 
@@ -651,8 +657,8 @@ initializeForest  = do
 						
 						let blankForest = V.replicate (s * s) noTree		-- Empty forest
 						
-						lumberjackCoords <- replicateM (s `div` 10) randomCoords
-						bearCoords <- replicateM (s `div` 50) randomCoords
+						lumberjackCoords <- replicateM lumberjackStarts randomCoords
+						bearCoords <- replicateM bearStarts randomCoords
 						
 						let ljs = zip lumberjackCoords (repeat 0)
 						let bs = zip bearCoords (repeat 0)
@@ -661,7 +667,7 @@ initializeForest  = do
 						
 						-- Now we'll fill our forest with trees
 						
-						treeCoords <- replicateM (s `div` 2) randomCoords
+						treeCoords <- replicateM treeStarts randomCoords
 						
 						mapM (flip setTree matureTree) treeCoords	-- Start with mature trees
 						
@@ -684,16 +690,18 @@ main = do
 
 	randGen <- getStdGen
 
-	let initialState = ForestState V.empty [] [] 0 0 0 0 0 0 0 0 randGen [] 100
+	let initialState = ForestState V.empty [] [] 0 0 0 0 0 0 0 0 randGen [] forestSize
 	
 	putStrLn "Starting the interpreter...\n"
 	
 	result <- execStateT runSimulation initialState
 	
 	-- We have to write out our result image
+
+	putStrLn "\nDone"
 	
-	putStrLn "\nWriting out the image."
-	
-	let fin = writeGifImages "output.gif" LoopingNever $ map (\x -> (ourPallet, 10, x)) (reverse $ frames result)
-	
-	either  (\a -> putStrLn $ "Error saving gif: " ++ a) id fin 
+-- 	putStrLn "\nWriting out the image."
+-- 	
+-- 	let fin = writeGifImages "output.gif" LoopingNever $ map (\x -> (ourPallet, 10, x)) (reverse $ frames result)
+-- 	
+-- 	either  (\a -> putStrLn $ "Error saving gif: " ++ a) id fin 
