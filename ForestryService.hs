@@ -56,7 +56,7 @@ type ForestFunction a = StateT ForestState IO a
 
 ------------------ A bunch of constants to make our life easy ------------------
 
-monthsToRun			= 600		-- How long our simulation runs
+monthsToRun			= 300		-- How long our simulation runs
 
 bearMoves			= 5			-- How many squares bears wonder a month
 lumberjackMoves		= 3			-- How many squares an LJ can wonder in a month
@@ -71,6 +71,7 @@ matureSpawnOfTen	= 1			-- 10% chance of a mature tree spawning
 elderSpawnOfTen		= 2			-- 20% chance of elder tree spawning
 
 forestSize			= 100		-- Size of each side of the forrest (total spots is ^2)
+treesPerLJ			= 10		-- Scaling factor determining how many trees an LJ needs to cause a hire
 
 lumberjackStarts	= forestSize `div` 10	-- Starting LJs
 bearStarts			= forestSize `div` 50	-- Starting bears
@@ -623,7 +624,7 @@ possibleYearlyUpdate = do
 lumberjacksNeeded :: Int -> Int -> Int
 lumberjacksNeeded h l
 					| h < l		= 0
-					| otherwise	= extra `div` 10 + 1 
+					| otherwise	= extra `div` treesPerLJ + 1 
 				where
 					extra = h - l
 
@@ -703,13 +704,11 @@ runSimulation = do
 ------------------ Our main function, to do the work ------------------
 
 main = do
-	putStrLn "Here is the program:"
-
 	randGen <- getStdGen
 
 	let initialState = ForestState V.empty M.empty M.empty 0 0 0 0 0 0 0 0 randGen [] forestSize
 	
-	putStrLn "Starting the interpreter...\n"
+	putStrLn "Simulating the forest...\n"
 	
 	result <- execStateT runSimulation initialState
 	
@@ -717,8 +716,8 @@ main = do
 
 	putStrLn "\nDone"
 	
--- 	putStrLn "\nWriting out the image."
--- 	
--- 	let fin = writeGifImages "output.gif" LoopingNever $ map (\x -> (ourPallet, 10, x)) (reverse $ frames result)
--- 	
--- 	either  (\a -> putStrLn $ "Error saving gif: " ++ a) id fin 
+	putStrLn "\nWriting out the image."
+	
+	let fin = writeGifImages "output.gif" LoopingNever $ map (\x -> (ourPallet, 10, x)) (reverse $ frames result)
+	
+	either  (\a -> putStrLn $ "Error saving gif: " ++ a) id fin 
