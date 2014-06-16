@@ -56,7 +56,7 @@ type ForestFunction a = StateT ForestState IO a
 
 ------------------ A bunch of constants to make our life easy ------------------
 
-monthsToRun			= 300		-- How long our simulation runs
+monthsToRun			= 1500		-- How long our simulation runs
 
 bearMoves			= 5			-- How many squares bears wonder a month
 lumberjackMoves		= 3			-- How many squares an LJ can wonder in a month
@@ -71,11 +71,14 @@ matureSpawnOfTen	= 1			-- 10% chance of a mature tree spawning
 elderSpawnOfTen		= 2			-- 20% chance of elder tree spawning
 
 forestSize			= 100		-- Size of each side of the forrest (total spots is ^2)
-treesPerLJ			= 10		-- Scaling factor determining how many trees an LJ needs to cause a hire
+treesToHire			= 10		-- Scaling factor determining how many trees an LJ needs to cause a hire
+treesToFire			= 5			-- Trees we have to be short to fire someone
 
 lumberjackStarts	= forestSize `div` 10	-- Starting LJs
 bearStarts			= forestSize `div` 50	-- Starting bears
 treeStarts			= forestSize `div` 2	-- Starting trees
+
+makeGif				= True		-- Should we make an image?
 
 ------------------ Static palette we'll use for everything ------------------
 
@@ -120,7 +123,7 @@ shouldSpawn t = do
 					
 					modify (\s -> s{randGen = r'})
 					
-					case t of _
+					case () of _
 							| isSapling t	-> return False						-- Saplings can't spawn
 							| isMature t	-> return $ n == matureSpawnOfTen	-- Mature have 10% chance at spawn each month
 							| isElder t		-> return $ n <= elderSpawnOfTen	-- Elders have 20% chance at spawn each month
@@ -280,7 +283,7 @@ setTree c t = do
 neighboringCells :: Coords -> ForestFunction [Coords]
 neighboringCells (x, y) = do
 						s <- gets size
-						
+
 						let possibilities = [(x + i, y + j) | i <- [-1..1], j <- [-1..1], (abs i) + (abs j) /= 0]
 
 						return $ filter (\(x, y) -> x >= 0 && y >= 0 && x < s && y < s) possibilities
@@ -553,7 +556,7 @@ printYearlyStats hired = do
 							if hired > 0 then
 								liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested %d new Lumberjacks hired.\n" y h hired
 							else
-								liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested 1 Lumberjack was let go.\n" y h										
+								liftIO $ printf "Year [%04d]: %d Pieces of lumber harvested %d Lumberjacks were let go.\n" y h (-1 * hired)
 							
 -- Print out the yearly stats
 printMonthlyStats :: ForestFunction ()
@@ -607,7 +610,7 @@ possibleYearlyUpdate = do
 									if needed > 0 then
 										sequence_ (replicate needed spawnLumberjack)
 									else
-										fireLumberjack
+										sequence_ (replicate (min (-1 * needed) (M.size ljs)) fireLumberjack)
 										
 									newLjs <- gets lumberjacks
 									
@@ -620,11 +623,11 @@ possibleYearlyUpdate = do
 									
 									clearYearlyStats					-- Clear the stats
 
--- Figure out how many lumberjacks are needed
+-- Figure out how many lumberjacks are needed (or extra)
 lumberjacksNeeded :: Int -> Int -> Int
 lumberjacksNeeded h l
-					| h < l		= 0
-					| otherwise	= extra `div` treesPerLJ + 1 
+					| h < l		= extra `div` treesToFire - 1
+					| otherwise	= extra `div` treesToHire + 1 
 				where
 					extra = h - l
 
@@ -651,9 +654,13 @@ monthlyUpdate = do
 					mapM_ moveLumberjacks [3,2,1]				-- Move lumberjacks 3 times					
 					mapM_ moveBears [5,4..1]					-- Move bears 5 times
 					
-					frame <- drawForest
+					if makeGif then
+						do
+							frame <- drawForest
 					
-					modify (\s -> s{frames = frame : (frames s)})	-- Draw a new GIF frame
+							modify (\s -> s{frames = frame : (frames s)})	-- Draw a new GIF frame
+					else
+						return ()
 					
 					printMonthlyStats							-- Print this month's stats
 					
@@ -691,9 +698,13 @@ initializeForest  = do
 						
 						-- And setup the initial frame
 						
-						frame <- drawForest
+						if makeGif then
+							do						
+								frame <- drawForest
 					
-						modify (\s -> s{frames = [frame]})	
+								modify (\s -> s{frames = [frame]})	
+						else
+							return ()
 
 -- Finishes initialization and runs everything
 runSimulation :: ForestFunction ()
@@ -716,8 +727,12 @@ main = do
 
 	putStrLn "\nDone"
 	
-	putStrLn "\nWriting out the image."
+	if makeGif then
+		do
+			putStrLn "\nWriting out the image."
 	
-	let fin = writeGifImages "output.gif" LoopingNever $ map (\x -> (ourPallet, 10, x)) (reverse $ frames result)
+			let fin = writeGifImages "output.gif" LoopingNever $ map (\x -> (ourPallet, 10, x)) (reverse $ frames result)
 	
-	either  (\a -> putStrLn $ "Error saving gif: " ++ a) id fin 
+			either  (\a -> putStrLn $ "Error saving gif: " ++ a) id fin 
+	else
+		return ()
